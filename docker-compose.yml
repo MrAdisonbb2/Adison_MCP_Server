@@ -1,0 +1,11 @@
+services:
+  adison-mcp:
+    build: .
+    container_name: adison-mcp-server
+    ports:
+      - "${MCP_PORT:-8000}:${MCP_PORT:-8000}"
+    env_file:
+      - .env
+    volumes:
+      - ./src:/app/src
+    restart: unless-stopped
