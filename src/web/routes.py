@@ -68,14 +68,14 @@ def register_web_routes(mcp: FastMCP) -> None:
 
             # รองรับกรณีผู้ใช้ก๊อปปี้ {"github": {"command": ...}} มาวางโดยไม่กรอกช่องชื่อแยก
             if (
-                not name
-                and len(raw_config) == 1
+                len(raw_config) == 1
                 and "command" not in raw_config
                 and "url" not in raw_config
             ):
                 only_key = next(iter(raw_config.keys()))
                 if isinstance(raw_config[only_key], dict):
-                    name = only_key
+                    if not name:
+                        name = only_key
                     raw_config = raw_config[only_key]
 
             result = upsert_server(mcp, name, raw_config)

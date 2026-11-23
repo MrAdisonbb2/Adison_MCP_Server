@@ -4,13 +4,15 @@ import re
 import shutil
 from pathlib import Path
 from typing import Any
+
 from fastmcp import FastMCP
+from fastmcp.server.providers.proxy import ProxyClient, ProxyProvider
 
 CONFIG_PATH = Path("mcp_servers.json")
 BACKUP_PATH = Path("mcp_servers.json.bak")
 
-# เก็บรายชื่อ Prefix ของ Proxy ที่ถูก Mount อยู่ในปัจจุบัน เพื่อใช้ถอดออกตอน Reload
-_mounted_prefixes: list[str] = []
+# เก็บรายการ Provider ตั้งต้นของระบบ (เช่น local_provider) เพื่อไม่ให้ถูกลบตอน Reload
+_base_providers: list[Any] | None = None
 
 
 def _resolve_env_vars(obj: Any) -> Any:
@@ -52,26 +54,20 @@ def _write_raw_config(data: dict[str, Any]) -> None:
 
 
 def _unmount_all(mcp: FastMCP) -> None:
-    """ถอด Proxy เก่าทั้งหมดออกจาก FastMCP ก่อนทำการ Reload"""
-    global _mounted_prefixes
-    if not _mounted_prefixes:
+    """ถอด Proxy Provider เก่าทั้งหมดออกจาก FastMCP ก่อนทำการ Reload"""
+    global _base_providers
+    if not hasattr(mcp, "providers") or not isinstance(mcp.providers, list):
         return
 
-    # รองรับโครงสร้าง Mount ของ FastMCP (ลบออกจากรายการ mounted servers)
-    if hasattr(mcp, "_mounted_servers") and isinstance(mcp._mounted_servers, dict):
-        for prefix in _mounted_prefixes:
-            mcp._mounted_servers.pop(prefix, None)
-    elif hasattr(mcp, "mounted_servers") and isinstance(mcp.mounted_servers, list):
-        mcp.mounted_servers[:] = [
-            m for m in mcp.mounted_servers if getattr(m, "prefix", None) not in _mounted_prefixes
-        ]
+    if _base_providers is None:
+        _base_providers = list(mcp.providers)
+        return
 
-    _mounted_prefixes.clear()
+    mcp.providers[:] = [p for p in mcp.providers if p in _base_providers]
 
 
 def load_external_mcps(mcp: FastMCP) -> dict[str, Any]:
-    """โหลดและ Mount MCP ภายนอกทั้งหมดจาก mcp_servers.json เข้าสู่ FastMCP"""
-    global _mounted_prefixes
+    """โหลดและเชื่อมต่อ MCP ภายนอกทั้งหมดจาก mcp_servers.json เข้าสู่ FastMCP 4.x"""
     _unmount_all(mcp)
 
     if not CONFIG_PATH.exists():
@@ -93,9 +89,11 @@ def load_external_mcps(mcp: FastMCP) -> dict[str, Any]:
         if server_cfg.get("disabled", False):
             continue
         try:
-            proxy = FastMCP.as_proxy({"mcpServers": {name: server_cfg}}, name=name)
-            mcp.mount(proxy, prefix=name)
-            _mounted_prefixes.append(name)
+            mcp_config = {"mcpServers": {name: server_cfg}}
+            provider = ProxyProvider(
+                client_factory=lambda cfg=mcp_config: ProxyClient(cfg)
+            )
+            mcp.add_provider(provider, namespace=name)
             loaded.append(name)
             print(f"[ProxyManager] เชื่อมต่อ MCP '{name}' สำเร็จ")
         except Exception as e:
