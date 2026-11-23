@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="th" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Adison MCP Gateway - Admin</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen font-sans antialiased">
+  <div class="max-w-4xl mx-auto px-4 py-8">
+    <!-- Header -->
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-800 pb-6 mb-6">
+      <div>
+        <h1 class="text-2xl font-bold text-white tracking-tight">Adison MCP Gateway</h1>
+        <p class="text-sm text-slate-400 mt-1">
+          Endpoint: <code class="bg-slate-900 text-emerald-400 px-2 py-0.5 rounded border border-slate-800">http://localhost:8000/mcp</code>
+        </p>
+      </div>
+      <div class="flex items-center gap-3">
+        <button
+          onclick="reloadAll()"
+          id="reloadBtn"
+          class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-medium border border-slate-700 transition cursor-pointer"
+        >
+          ↻ Reload MCPs
+        </button>
+        <button
+          onclick="openModal()"
+          class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium shadow transition cursor-pointer"
+        >
+          + เพิ่ม MCP ใหม่
+        </button>
+      </div>
+    </div>
+
+    <!-- Notification Banner -->
+    <div id="toast" class="hidden mb-6 px-4 py-3 rounded-lg text-sm border"></div>
+
+    <!-- Server List -->
+    <div id="serverList" class="space-y-4">
+      <div class="text-center py-12 text-slate-500">กำลังโหลดรายการ MCP...</div>
+    </div>
+  </div>
+
+  <!-- Add / Edit Modal -->
+  <div id="modal" class="fixed inset-0 bg-black/75 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+    <div class="bg-slate-900 border border-slate-800 rounded-xl w-full max-w-xl shadow-2xl overflow-hidden">
+      <div class="flex items-center justify-between px-6 py-4 border-b border-slate-800">
+        <h2 id="modalTitle" class="text-lg font-semibold text-white">เพิ่ม MCP Server</h2>
+        <button onclick="closeModal()" class="text-slate-400 hover:text-white text-xl leading-none cursor-pointer">&times;</button>
+      </div>
+
+      <form onsubmit="handleSave(event)" class="p-6 space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1">
+            ชื่อ MCP Server <span class="text-slate-500 font-normal">(เว้นว่างได้หากวาง JSON ที่มีชื่อครอบอยู่แล้ว)</span>
+          </label>
+          <input
+            type="text"
+            id="serverName"
+            placeholder="เช่น notion, github, playwright"
+            class="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 text-sm focus:outline-none focus:border-emerald-500"
+          />
+        </div>
+
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <label class="block text-sm font-medium text-slate-300">JSON Config</label>
+            <button type="button" onclick="formatJsonInput()" class="text-xs text-emerald-400 hover:underline cursor-pointer">
+              จัดรูปแบบ JSON
+            </button>
+          </div>
+          <textarea
+            id="serverConfig"
+            rows="10"
+            required
+            placeholder='{
+  "command": "npx",
+  "args": ["-y", "@notionhq/notion-mcp-server"],
+  "env": {
+    "NOTION_TOKEN": "${NOTION_API_KEY}"
+  }
+}'
+            class="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-emerald-300 font-mono text-xs focus:outline-none focus:border-emerald-500"
+          ></textarea>
+        </div>
+
+        <div class="flex justify-end gap-3 pt-2">
+          <button
+            type="button"
+            onclick="closeModal()"
+            class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm cursor-pointer"
+          >
+            ยกเลิก
+          </button>
+          <button
+            type="submit"
+            id="saveBtn"
+            class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium cursor-pointer"
+          >
+            บันทึกและโหลดใช้งาน
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    let currentServers = {};
+    let editingOriginalName = null;
+
+    function showToast(message, type = "success") {
+      const toast = document.getElementById("toast");
+      toast.className = "mb-6 px-4 py-3 rounded-lg text-sm border ";
+      if (type === "error") {
+        toast.className += "bg-rose-950/70 border-rose-800 text-rose-200";
+      } else if (type === "warn") {
+        toast.className += "bg-amber-950/70 border-amber-800 text-amber-200";
+      } else {
+        toast.className += "bg-emerald-950/70 border-emerald-800 text-emerald-200";
+      }
+      toast.textContent = message;
+      toast.classList.remove("hidden");
+    }
+
+    function reportReloadResult(prefix, reload) {
+      if (!reload) {
+        showToast(prefix, "success");
+        return;
+      }
+      const failedKeys = Object.keys(reload.failed || {});
+      if (failedKeys.length > 0) {
+        const details = failedKeys.map((k) => `${k}: ${reload.failed[k]}`).join(" | ");
+        showToast(`${prefix} — แต่มีตัวที่เชื่อมต่อไม่สำเร็จ (${details})`, "warn");
+      } else {
+        showToast(`${prefix} (เชื่อมต่อสำเร็จ ${reload.loaded.length} ตัว)`, "success");
+      }
+    }
+
+    function escapeHtml(str) {
+      return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function renderServers(servers) {
+      currentServers = servers || {};
+      const container = document.getElementById("serverList");
+      const entries = Object.entries(currentServers);
+
+      if (entries.length === 0) {
+        container.innerHTML = `
+          <div class="bg-slate-900/60 border border-dashed border-slate-800 rounded-xl p-10 text-center">
+            <p class="text-slate-400 mb-3">ยังไม่มี MCP Server ภายนอกในระบบ</p>
+            <button onclick="openModal()" class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium cursor-pointer">
+              + เพิ่ม MCP ตัวแรก
+            </button>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = entries
+        .map(([name, cfg]) => {
+          const isDisabled = Boolean(cfg.disabled);
+          const typeLabel = cfg.url ? "SSE / HTTP" : `STDIO (${cfg.command || "cmd"})`;
+          const targetLabel = cfg.url
+            ? cfg.url
+            : `${cfg.command || ""} ${(cfg.args || []).join(" ")}`.trim();
+
+          return `
+            <div class="bg-slate-900 border ${isDisabled ? "border-slate-800/60 opacity-60" : "border-slate-800"} rounded-xl p-5 transition">
+              <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div class="min-w-0">
+                  <div class="flex items-center gap-2.5 flex-wrap">
+                    <span class="h-2.5 w-2.5 rounded-full ${isDisabled ? "bg-slate-600" : "bg-emerald-400"}"></span>
+                    <h3 class="text-base font-semibold text-white">${escapeHtml(name)}</h3>
+                    <span class="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
+                      ${escapeHtml(typeLabel)}
+                    </span>
+                    ${isDisabled ? '<span class="text-xs px-2 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-800">ปิดใช้งาน</span>' : ""}
+                  </div>
+                  <p class="text-xs font-mono text-slate-400 mt-2 truncate">${escapeHtml(targetLabel)}</p>
+                </div>
+
+                <div class="flex items-center gap-2 shrink-0">
+                  <button
+                    onclick="toggleServer('${escapeHtml(name)}')"
+                    class="px-3 py-1.5 rounded-lg text-xs font-medium border transition cursor-pointer ${
+                      isDisabled
+                        ? "bg-emerald-950/50 border-emerald-800 text-emerald-300 hover:bg-emerald-900/50"
+                        : "bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700"
+                    }"
+                  >
+                    ${isDisabled ? "เปิดใช้งาน" : "ปิดชั่วคราว"}
+                  </button>
+                  <button
+                    onclick="openModal('${escapeHtml(name)}')"
+                    class="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-sky-300 border border-slate-700 transition cursor-pointer"
+                  >
+                    แก้ไข
+                  </button>
+                  <button
+                    onclick="deleteServer('${escapeHtml(name)}')"
+                    class="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-rose-950 text-rose-400 border border-slate-700 hover:border-rose-800 transition cursor-pointer"
+                  >
+                    ลบ
+                  </button>
+                </div>
+              </div>
+            </div>
+          `;
+        })
+        .join("");
+    }
+
+    async function fetchServers() {
+      try {
+        const res = await fetch("/api/servers");
+        const data = await res.json();
+        if (data.status === "ok") {
+          renderServers(data.servers);
+        } else {
+          showToast(data.message || "โหลดข้อมูลไม่สำเร็จ", "error");
+        }
+      } catch (err) {
+        showToast("ไม่สามารถติดต่อ Server ได้: " + err.message, "error");
+      }
+    }
+
+    function openModal(name = null) {
+      editingOriginalName = name;
+      const modal = document.getElementById("modal");
+      const title = document.getElementById("modalTitle");
+      const nameInput = document.getElementById("serverName");
+      const configInput = document.getElementById("serverConfig");
+
+      if (name && currentServers[name]) {
+        title.textContent = `แก้ไข MCP: ${name}`;
+        nameInput.value = name;
+        nameInput.readOnly = true;
+        nameInput.classList.add("opacity-60");
+        configInput.value = JSON.stringify(currentServers[name], null, 2);
+      } else {
+        title.textContent = "เพิ่ม MCP Server ใหม่";
+        nameInput.value = "";
+        nameInput.readOnly = false;
+        nameInput.classList.remove("opacity-60");
+        configInput.value = "";
+      }
+
+      modal.classList.remove("hidden");
+      modal.classList.add("flex");
+    }
+
+    function closeModal() {
+      const modal = document.getElementById("modal");
+      modal.classList.add("hidden");
+      modal.classList.remove("flex");
+      editingOriginalName = null;
+    }
+
+    function formatJsonInput() {
+      const input = document.getElementById("serverConfig");
+      try {
+        const parsed = JSON.parse(input.value);
+        input.value = JSON.stringify(parsed, null, 2);
+      } catch (e) {
+        alert("รูปแบบ JSON ยังไม่ถูกต้อง: " + e.message);
+      }
+    }
+
+    async function handleSave(event) {
+      event.preventDefault();
+      const saveBtn = document.getElementById("saveBtn");
+      const name = document.getElementById("serverName").value.trim();
+      const config = document.getElementById("serverConfig").value.trim();
+
+      saveBtn.disabled = true;
+      saveBtn.textContent = "กำลังบันทึกและเชื่อมต่อ...";
+
+      try {
+        const res = await fetch("/api/servers", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, config }),
+        });
+        const data = await res.json();
+
+        if (data.status === "ok") {
+          closeModal();
+          renderServers(data.servers);
+          reportReloadResult(`บันทึก '${data.name}' เรียบร้อย`, data.reload);
+        } else {
+          alert(data.message || "เกิดข้อผิดพลาดในการบันทึก");
+        }
+      } catch (err) {
+        alert("เชื่อมต่อ Server ล้มเหลว: " + err.message);
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.textContent = "บันทึกและโหลดใช้งาน";
+      }
+    }
+
+    async function toggleServer(name) {
+      try {
+        const res = await fetch(`/api/servers/${encodeURIComponent(name)}/toggle`, {
+          method: "POST",
+        });
+        const data = await res.json();
+        if (data.status === "ok") {
+          renderServers(data.servers);
+          reportReloadResult(`อัปเดตสถานะ '${name}' เรียบร้อย`, data.reload);
+        } else {
+          showToast(data.message || "เปลี่ยนสถานะไม่สำเร็จ", "error");
+        }
+      } catch (err) {
+        showToast("เชื่อมต่อ Server ล้มเหลว: " + err.message, "error");
+      }
+    }
+
+    async function deleteServer(name) {
+      if (!confirm(`ยืนยันการลบ MCP Server '${name}' ออกจากระบบหรือไม่?`)) return;
+
+      try {
+        const res = await fetch(`/api/servers/${encodeURIComponent(name)}`, {
+          method: "DELETE",
+        });
+        const data = await res.json();
+        if (data.status === "ok") {
+          renderServers(data.servers);
+          reportReloadResult(`ลบ '${name}' ออกจากระบบแล้ว`, data.reload);
+        } else {
+          showToast(data.message || "ลบไม่สำเร็จ", "error");
+        }
+      } catch (err) {
+        showToast("เชื่อมต่อ Server ล้มเหลว: " + err.message, "error");
+      }
+    }
+
+    async function reloadAll() {
+      const btn = document.getElementById("reloadBtn");
+      btn.disabled = true;
+      btn.textContent = "กำลัง Reload...";
+      try {
+        const res = await fetch("/api/reload", { method: "POST" });
+        const data = await res.json();
+        if (data.status === "ok") {
+          renderServers(data.servers);
+          reportReloadResult("Reload MCP ทั้งหมดเรียบร้อย", data.reload);
+        } else {
+          showToast(data.message || "Reload ไม่สำเร็จ", "error");
+        }
+      } catch (err) {
+        showToast("เชื่อมต่อ Server ล้มเหลว: " + err.message, "error");
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "↻ Reload MCPs";
+      }
+    }
+
+    fetchServers();
+  </script>
+</body>
+</html>
