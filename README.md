@@ -1,5 +1,7 @@
 # Adison MCP Gateway
 
+[![M8ven Score](https://m8ven.ai/badge/mcp/mradisonbb2-adison-mcp-server-9qj96w?v=89a153e3972173e1d58b6513bf3b518f)](https://m8ven.ai/mcp/mradisonbb2-adison-mcp-server-9qj96w?s=readme)
+
 ศูนย์กลางจัดการและรวบรวม **Model Context Protocol (MCP) Servers** แบบครบวงจร (Centralized MCP Gateway) พร้อมหน้าเว็บ Dashboard สำหรับจัดการเพิ่ม แก้ไข เปิด-ปิด และลบ MCP Servers ได้แบบ Real-time โดยไม่ต้องเขียนโค้ดหรือแก้ไขไฟล์ตั้งค่าหลายที่
 
 ---
