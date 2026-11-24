@@ -6,6 +6,11 @@ __pycache__/
 dist/
 build/
 
+# Python & Pytest Cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
 # Virtual Environment
 .venv/
 venv/
